@@ -472,6 +472,7 @@ class Runner(AbstractEnvRunner):
         mb_obs, mb_rewards, mb_actions, mb_values, mb_dones, mb_neglogpacs = [], [], [], [], [], []
         mb_states = self.states
         mb_effective_steps, _ = np.indices((self.n_steps, self.n_envs))
+        mb_gae_masks = np.full_like(mb_effective_steps, True)
         ep_infos = []
         for _ in range(self.n_steps):
             actions, values, self.states, neglogpacs = self.model.step(self.obs, self.states, self.dones)  # pytype: disable=attribute-error
@@ -518,6 +519,7 @@ class Runner(AbstractEnvRunner):
         # list of (effective_step_idx, decision_steps_arr)
         steps = list(enumerate(effective_sort))
         for effective_step, decision_steps in reversed(steps):
+            gae_masks = mb_gae_masks[effective_step]
             if effective_step == self.n_steps - 1:
                 nextnonterminal = 1.0 - self.dones
                 nextvalues = last_values
@@ -527,10 +529,12 @@ class Runner(AbstractEnvRunner):
                 nextvalues = next_decision_steps.choose(mb_values)
             delta = (
                 mb_rewards[effective_step]
-                + self.gamma * nextvalues * nextnonterminal
+                + self.gamma * nextvalues * nextnonterminal * gae_masks
                 - decision_steps.choose(mb_values)
             )
-            last_gae_lam = delta + self.gamma * self.lam * nextnonterminal * last_gae_lam
+            last_gae_lam = (
+                delta + self.gamma * self.lam * nextnonterminal * gae_masks * last_gae_lam
+            )
             mb_advs[decision_steps, np.arange(self.n_envs)] = last_gae_lam
         mb_returns = mb_advs + mb_values
 
